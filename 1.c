@@ -8,7 +8,6 @@
 #define MAX_COMMAND 1024
 #define KEY_SIZE 256
 #define IV_SIZE 16
-#define BUFFER_SIZE 1024
 
 void handleErrors() {
     exit(1);
@@ -16,7 +15,7 @@ void handleErrors() {
 
 
 int encrypt(char buffer[MAX_COMMAND], unsigned char key[KEY_SIZE / 8], unsigned char iv[IV_SIZE]) {
-
+    
     printf("\n NOW IN ENCRYPT FUNCTION \n");
     printf("buffer: %s\n", buffer);
     printf("key: %s\n", key);
@@ -42,57 +41,121 @@ int encrypt(char buffer[MAX_COMMAND], unsigned char key[KEY_SIZE / 8], unsigned 
 
     fseek(input_file, 0, SEEK_SET);
 
-    // DIVIDE EACH BY 16 BYTES
+    
 
-    int blocks2enc = input_file_size / 16;
+    
 
-    printf("blocks to encrypt: %d\n\n", blocks2enc);
-
-    // USE THAT NUMBER TO LOOP THE UPDATE ENCRYPT FUNCTION
-
+    
+ 
     EVP_CIPHER_CTX *ctx;
-
+ 
     int len;
-
-    int ciphertext_len;
-
+ 
+    int out_buffer_len;
+ 
+    
     if(!(ctx = EVP_CIPHER_CTX_new())) {
         handleErrors();
     }
-    
+
     if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
         handleErrors();
     }
+    // ! group
 
-    unsigned char last_out_buffer[2 * BUFFER_SIZE];
+// ^ NEED TO FIGURE OUT HOW TO RUN THIS MULTIPLE TIMES DEPENDING ON THE SIZE
 
-    for (int x = 0; x < blocks2enc; x++) {
-        
-        unsigned char in_buffer[2 * BUFFER_SIZE];
-        unsigned char out_buffer[2 * BUFFER_SIZE];
+    unsigned char out_buffer[255];
 
-        fread(in_buffer, sizeof(unsigned char), BUFFER_SIZE, input_file);
+    printf("in file size boo: %d\n", input_file_size);
+    
+    if (input_file_size > 255) { // this is where you loop the updates
+printf("got here1\n"); // we passed here
+        char suffix[] = "TEMP";
+printf("got here1\n"); // we passed here
+        strcat(buffer, suffix);
+printf("got here1\n"); // we passed here
+        FILE *output_file = fopen(buffer, "ab");
+        printf("got here1\n"); // we passed here
+        unsigned char input_buffer[255];
+printf("got here1\n"); // we passed here
+        while (fread(input_buffer, sizeof(unsigned char), 255, input_file) > 0) {
 
-        if(1 != EVP_EncryptUpdate(ctx, out_buffer, &len, in_buffer, strlen(in_buffer))) {
-            handleErrors();
+            printf("got here1\n"); // !!!!! WE ARE ERRORING IN HERE OKAY
+            
+            EVP_EncryptUpdate(ctx, out_buffer, &len, input_buffer, 255); //! something to do with this thing. its running the encryption in blocks in the backend and i have no control over how i pass in my info
+            out_buffer_len = len;
+            printf("input buffer: %s\n", input_buffer);
+
+            fwrite(out_buffer, sizeof(unsigned char), out_buffer_len, output_file);
+
+            int inbuflen = strlen(input_buffer);
+
+            for (int x = 0; x < inbuflen; x++) { // clear the in_buffer to ensure integrity
+
+                input_buffer[x] = '\0';
+
+            }
+
+            for (int x = 0; x < out_buffer_len; x++) { // clear the out_buffer to ensure integrity
+
+                out_buffer[x] = '\0';
+
+            }
+
+            // ! WRITE OUT_BUFFER TO THE FILE HERE WB MODE TO A TEMP FILE THAT GETS RENAMED TO THE ORIGINAL NAME
         }
-        ciphertext_len += len;
 
-        printf("outbuffer %d: %s", x, out_buffer);
-    }
+        if (1 != EVP_EncryptFinal_ex(ctx, out_buffer + len, &len)) {
 
-    if(1 != EVP_EncryptFinal_ex(ctx, last_out_buffer, &len)) {
-    
         handleErrors();
-    
+
+        }
+        
+        fclose(input_file);
+        EVP_CIPHER_CTX_free(ctx);
+
+        return 0;
+        
+
+    }
+    else {
+
+    printf("got here2\n"); // WHY IT GO HERE
+        unsigned char input_buffer[255];
+        
+        fread(input_buffer, sizeof(unsigned char), 255, input_file);
+        EVP_EncryptUpdate(ctx, out_buffer, &len, input_buffer, input_file_size);
+        out_buffer_len = len;
     }
 
-    ciphertext_len += len;
 
+    
+    
+    
+    // ! HOW DO I MAKE OUT_BUFFER WORK FOR THIS CONTEXT IF THE INPUT FILE IS SO HUGE AND THE OUT_BUFFER ITERATES | IDK IF THIS WORKS BUT I TMIGHT IDK
+    if (1 != EVP_EncryptFinal_ex(ctx, out_buffer + len, &len)) {
+
+        handleErrors();
+
+    }
+    out_buffer_len += len;
+
+    printf("out buffer: %s\n", out_buffer);
+    printf("out buffer SIZEEEEE: %d\n", out_buffer_len);
+    
+    char suffix[] = "TEMP";
+
+    strcat(buffer, suffix);
+
+    FILE *output_file = fopen(buffer, "wb");
+
+    fwrite(out_buffer, sizeof(unsigned char), out_buffer_len, output_file);
+    fclose(input_file);
+    fclose(output_file);
+    
     EVP_CIPHER_CTX_free(ctx);
 
-    fclose(input_file);
-    
     return 0;
 
 }
@@ -124,16 +187,27 @@ int main() {
     
     // Read the output of the command line by line and store it in a variable
     while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+        if (strlen(buffer) >= MAX_COMMAND - 1) {
+        // Handle the case where the input string is too long
+        fprintf(stderr, "Error: Input string exceeds maximum buffer size\n");
+            continue; // Skip processing this input
+        }
+    
         // Do something with the file path (e.g., store it in an array)
-        //
-        //
-        buffer[strlen(buffer) - 1] = '\0';
-
+        buffer[strlen(buffer) - 1] = '\0'; // Remove newline character
         encrypt(buffer, key, iv);
     }
-
     // Close the pipe
     pclose(pipe);
+
+    FILE *keyFile = fopen("key.dat", "wb");
+    FILE *ivFile = fopen("iv.dat", "wb");
+
+    fwrite(key, sizeof(unsigned char), (KEY_SIZE / 8), keyFile);
+    fwrite(iv, sizeof(unsigned char), IV_SIZE, ivFile);
+
+    fclose(keyFile);
+    fclose(ivFile);
 
     return 0;
 }
